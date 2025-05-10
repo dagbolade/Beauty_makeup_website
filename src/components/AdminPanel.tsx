@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { format } from 'date-fns';
 import { supabase } from "../lib/supabase";
 import toast from "react-hot-toast";
+import { format, addDays, addMonths, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, parseISO, isValid } from 'date-fns';
 
 export default function AdminPanel() {
   // State for different data types
@@ -32,6 +32,16 @@ export default function AdminPanel() {
     blockedDates: false
   });
 
+  // Bulk time slot generator state
+  const [generating, setGenerating] = useState(false);
+  const [bulkStartDate, setBulkStartDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [bulkEndDate, setBulkEndDate] = useState(format(addDays(new Date(), 30), 'yyyy-MM-dd'));
+  const [selectedServiceType, setSelectedServiceType] = useState('default');
+  
+  // Calendar state
+  const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [calendarDays, setCalendarDays] = useState([]);
+
   // Dashboard stats
   const [dashboardStats, setDashboardStats] = useState({
     pendingEnquiries: 0,
@@ -39,6 +49,14 @@ export default function AdminPanel() {
     todayEnquiries: 0,
     totalEnquiries: 0
   });
+  
+  // Generate calendar days for the current month
+  useEffect(() => {
+    const monthStart = startOfMonth(currentMonth);
+    const monthEnd = endOfMonth(currentMonth);
+    const daysArray = eachDayOfInterval({ start: monthStart, end: monthEnd });
+    setCalendarDays(daysArray);
+  }, [currentMonth]);
   
   // Load data on component mount
   useEffect(() => {
@@ -99,22 +117,22 @@ export default function AdminPanel() {
     try {
       console.log('Fetching enquiries from database...');
       
-      // Get all enquiries
-      const { data, error } = await supabase
+      // Direct query with detailed logging
+      const { data: enquiryData, error: enquiryError } = await supabase
         .from('enquiries')
-        .select('*')
-        .order('created_at', { ascending: false });
+        .select('*');
       
-      console.log('Supabase response:', { data, error });
+      // Log the raw response
+      console.log('Supabase enquiries response:', { data: enquiryData, error: enquiryError });
       
-      if (error) {
-        console.error('Error fetching enquiries:', error);
+      if (enquiryError) {
+        console.error('Error fetching enquiries:', enquiryError);
         toast.error('Failed to load enquiries');
         setEnquiries([]);
         return;
       }
       
-      // Now fetch all time slots in a single query
+      // Now fetch all time slots to associate with enquiries
       const { data: allTimeSlots, error: timeSlotsError } = await supabase
         .from('time_slots')
         .select('*');
@@ -123,39 +141,22 @@ export default function AdminPanel() {
         console.error('Error fetching time slots for enquiries:', timeSlotsError);
       }
       
-      // Create a map of time slot IDs to time slot objects for quick lookup
+      // Create a lookup map for time slots
       const timeSlotsMap = {};
-      if (allTimeSlots) {
+      if (allTimeSlots && allTimeSlots.length > 0) {
         allTimeSlots.forEach(slot => {
           timeSlotsMap[slot.id] = slot;
         });
       }
       
-      // Merge enquiries with their time slot data
-      const enhancedEnquiries = data.map(enquiry => {
-        return {
-          ...enquiry,
-          timeSlot: timeSlotsMap[enquiry.time_slot_id] || null
-        };
-      });
+      // Enhance enquiries with time slot data
+      const enhancedEnquiries = enquiryData.map(enquiry => ({
+        ...enquiry,
+        timeSlot: timeSlotsMap[enquiry.time_slot_id] || null
+      }));
       
-      console.log(`Successfully fetched ${enhancedEnquiries.length} enquiries with time slot data:`, enhancedEnquiries);
+      console.log(`Successfully fetched ${enhancedEnquiries.length} enquiries with time slot data`);
       setEnquiries(enhancedEnquiries);
-      
-      // Update dashboard stats
-      if (enhancedEnquiries.length > 0) {
-        const today = format(new Date(), 'yyyy-MM-dd');
-        const pendingCount = enhancedEnquiries.filter(e => e.status === 'pending').length;
-        const confirmedCount = enhancedEnquiries.filter(e => e.status === 'confirmed').length;
-        const todayCount = enhancedEnquiries.filter(e => e.enquiry_date === today).length;
-        
-        setDashboardStats({
-          pendingEnquiries: pendingCount,
-          confirmedEnquiries: confirmedCount,
-          todayEnquiries: todayCount,
-          totalEnquiries: enhancedEnquiries.length
-        });
-      }
     } catch (error) {
       console.error('Exception in fetchEnquiries:', error);
       toast.error('Failed to load enquiries');
@@ -251,34 +252,123 @@ export default function AdminPanel() {
     }
   };
 
-  const addMultipleTimeSlots = async () => {
+  // New time slot generation function
+  const generateTimeSlots = async (startDate, endDate, serviceType = 'default') => {
     try {
-      // Add the same slot for the next 7 days
-      const slots = [];
-      
-      for (let i = 0; i < 7; i++) {
-        const date = new Date(newTimeSlot.slot_date);
-        date.setDate(date.getDate() + i);
+      // Define time slot durations based on service type
+      const getDuration = (serviceType) => {
+        // Convert service type to lowercase for case-insensitive comparison
+        const type = serviceType.toLowerCase();
         
-        slots.push({
-          start_time: newTimeSlot.start_time,
-          end_time: newTimeSlot.end_time,
-          slot_date: format(date, 'yyyy-MM-dd'),
-          is_available: true
+        // Check if it's a bridal service
+        if (type.includes('bridal')) {
+          return 120; // 2 hours for bridal services
+        }
+        
+        // Default duration is 90 minutes (1 hour 30 minutes)
+        return 90;
+      };
+      
+      // Get appropriate duration based on service type
+      const durationMinutes = getDuration(serviceType);
+      
+      // Convert dates to JavaScript Date objects if they're strings
+      const start = typeof startDate === 'string' ? new Date(startDate) : startDate;
+      const end = typeof endDate === 'string' ? new Date(endDate) : endDate;
+      
+      // Initialize array to hold all new time slots
+      const newSlots = [];
+      
+      // Loop through each day in the date range
+      const currentDate = new Date(start);
+      while (currentDate <= end) {
+        // Start times for each day (24-hour format)
+        const dailyStartTimes = ['09:00', '11:00', '13:00', '15:00', '17:00'];
+        
+        // Adjust end times based on duration
+        const dailyTimePairs = dailyStartTimes.map(startTime => {
+          // Parse start time
+          const [startHour, startMinute] = startTime.split(':').map(num => parseInt(num, 10));
+          
+          // Calculate end time based on duration
+          let endHour = startHour + Math.floor(durationMinutes / 60);
+          let endMinute = startMinute + (durationMinutes % 60);
+          
+          // Adjust for minute overflow
+          if (endMinute >= 60) {
+            endHour += 1;
+            endMinute -= 60;
+          }
+          
+          // Format the end time with leading zeros if needed
+          const formattedEndHour = endHour.toString().padStart(2, '0');
+          const formattedEndMinute = endMinute.toString().padStart(2, '0');
+          const endTime = `${formattedEndHour}:${formattedEndMinute}`;
+          
+          return { startTime, endTime };
         });
+        
+        // Format the current date as yyyy-MM-dd
+        const formattedDate = currentDate.toISOString().split('T')[0]; // yyyy-MM-dd format
+        
+        // Create time slot objects for this day
+        for (const { startTime, endTime } of dailyTimePairs) {
+          newSlots.push({
+            start_time: startTime,
+            end_time: endTime,
+            slot_date: formattedDate,
+            is_available: true
+          });
+        }
+        
+        // Move to the next day
+        currentDate.setDate(currentDate.getDate() + 1);
       }
       
-      const { error } = await supabase
+      // Insert the new time slots into the database
+      const { data, error } = await supabase
         .from('time_slots')
-        .insert(slots);
+        .insert(newSlots);
         
       if (error) throw error;
       
-      toast.success(`Added ${slots.length} time slots successfully`);
-      fetchTimeSlots();
+      return { success: true, count: newSlots.length };
     } catch (error) {
-      console.error('Error adding multiple time slots:', error);
-      toast.error('Failed to add time slots');
+      console.error('Error generating time slots:', error);
+      return { success: false, error };
+    }
+  };
+
+  const handleGenerateTimeSlots = async () => {
+    if (!bulkStartDate || !bulkEndDate) {
+      toast.error('Please select start and end dates');
+      return;
+    }
+    
+    const start = new Date(bulkStartDate);
+    const end = new Date(bulkEndDate);
+    
+    if (start > end) {
+      toast.error('Start date must be before end date');
+      return;
+    }
+    
+    setGenerating(true);
+    
+    try {
+      const result = await generateTimeSlots(start, end, selectedServiceType);
+      
+      if (result.success) {
+        toast.success(`Generated ${result.count} time slots successfully`);
+        fetchTimeSlots(); // Refresh the time slots list
+      } else {
+        toast.error('Failed to generate time slots');
+      }
+    } catch (error) {
+      console.error('Error in handleGenerateTimeSlots:', error);
+      toast.error('An error occurred while generating time slots');
+    } finally {
+      setGenerating(false);
     }
   };
 
@@ -359,14 +449,13 @@ export default function AdminPanel() {
   // Enquiry management with manual slot confirmation
   const updateEnquiryStatus = async (id, status) => {
     try {
-      // Only update the status field
       const { error } = await supabase
         .from('enquiries')
         .update({ status })
         .eq('id', id);
-  
+
       if (error) throw error;
-  
+
       // Get the full enquiry details to access the time slot
       const { data: enquiryData, error: enquiryError } = await supabase
         .from('enquiries')
@@ -387,7 +476,7 @@ export default function AdminPanel() {
             
           console.log(`Time slot ${enquiryData.time_slot_id} marked as unavailable after confirmation`);
           
-          // Handle conflicting enquiries
+          // Optionally, you might want to reject other pending enquiries for the same time slot
           const { data: conflictingEnquiries } = await supabase
             .from('enquiries')
             .select('id')
@@ -396,7 +485,7 @@ export default function AdminPanel() {
             .eq('status', 'pending');
             
           if (conflictingEnquiries?.length > 0) {
-            // Only update status field, no admin_notes
+            // Auto-reject all conflicting enquiries
             await supabase
               .from('enquiries')
               .update({ status: 'cancelled' })
@@ -415,37 +504,13 @@ export default function AdminPanel() {
           console.log(`Time slot ${enquiryData.time_slot_id} marked as available after cancellation`);
         }
       }
-  
+
       toast.success('Enquiry status updated successfully');
       fetchEnquiries();
       fetchTimeSlots(); // Refresh time slots to show updated availability
     } catch (error) {
       console.error('Error updating enquiry status:', error);
       toast.error('Failed to update enquiry status');
-    }
-  };
-
-  const addEnquiryNote = async () => {
-    if (!selectedEnquiry || !enquiryNote) return;
-    
-    try {
-      const { error } = await supabase
-        .from('enquiries')
-        .update({ 
-          admin_notes: enquiryNote,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', selectedEnquiry.id);
-        
-      if (error) throw error;
-      
-      toast.success('Note added to enquiry');
-      setEnquiryNote('');
-      fetchEnquiries();
-      setSelectedEnquiry(null);
-    } catch (error) {
-      console.error('Error adding enquiry note:', error);
-      toast.error('Failed to add note');
     }
   };
 
@@ -530,11 +595,81 @@ export default function AdminPanel() {
       toast.success('Enquiry rejected successfully');
       fetchEnquiries();
       setShowRejectionModal(false);
-      setRejectionReason(''); 
+      setRejectionReason('');
     } catch (error) {
       console.error('Error rejecting enquiry:', error);
       toast.error('Failed to reject enquiry');
     }
+  };
+
+  // For blocked date ranges
+const [blockDateRange, setBlockDateRange] = useState(false);
+const [endBlockedDate, setEndBlockedDate] = useState('');
+
+// Add this function to handle blocking a range of dates
+const addBlockedDateRange = async () => {
+  try {
+    if (!newBlockedDate.date || !endBlockedDate) {
+      toast.error('Please select both start and end dates');
+      return;
+    }
+
+    // Parse and validate the dates
+    if (!isValid(parseISO(newBlockedDate.date)) || !isValid(parseISO(endBlockedDate))) {
+      toast.error('Invalid date format');
+      return;
+    }
+
+    const startDate = parseISO(newBlockedDate.date);
+    const endDate = parseISO(endBlockedDate);
+    
+    if (startDate > endDate) {
+      toast.error('Start date must be before end date');
+      return;
+    }
+
+    // Create an array of dates to block
+    const blockedDates = [];
+    const currentDate = new Date(startDate);
+    
+    // Generate all dates in the range
+    while (currentDate <= endDate) {
+      blockedDates.push({
+        date: format(currentDate, 'yyyy-MM-dd'),
+        reason: newBlockedDate.reason
+      });
+      
+      // Move to the next day
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+    
+    // Insert all dates in one batch
+    const { error } = await supabase
+      .from('blocked_dates')
+      .insert(blockedDates);
+
+    if (error) throw error;
+
+    toast.success(`Blocked ${blockedDates.length} dates successfully`);
+    fetchBlockedDates();
+    
+    // Reset form
+    setNewBlockedDate({ date: '', reason: '' });
+    setEndBlockedDate('');
+    setBlockDateRange(false);
+  } catch (error) {
+    console.error('Error adding blocked date range:', error);
+    toast.error('Failed to block dates');
+  }
+};
+
+  // Calendar navigation
+  const previousMonth = () => {
+    setCurrentMonth(prevMonth => addMonths(prevMonth, -1));
+  };
+
+  const nextMonth = () => {
+    setCurrentMonth(prevMonth => addMonths(prevMonth, 1));
   };
 
   // Debug function
@@ -564,7 +699,7 @@ export default function AdminPanel() {
   // Renders
   const renderTabs = () => {
     return (
-      <div className="flex border-b mb-6">
+      <div className="flex border-b mb-6 overflow-x-auto">
         <button 
           className={`px-4 py-2 font-medium ${activeTab === 'dashboard' ? 'border-b-2 border-pink-500 text-pink-600' : 'text-gray-500 hover:text-gray-700'}`}
           onClick={() => setActiveTab('dashboard')}
@@ -695,7 +830,7 @@ export default function AdminPanel() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         {enquiry.service_option}
-                      </td>
+                      </td> 
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                           enquiry.status === 'confirmed' ? 'bg-green-100 text-green-800' :
@@ -769,7 +904,7 @@ export default function AdminPanel() {
 
               <div className="space-y-4">
                 <div>
-                <h3 className="text-sm text-gray-500">Client</h3>
+                  <h3 className="text-sm text-gray-500">Client</h3>
                   <p className="font-medium">{selectedEnquiry.client_name}</p>
                   <p className="text-sm">{selectedEnquiry.client_email}</p>
                   <p className="text-sm">{selectedEnquiry.client_phone}</p>
@@ -832,30 +967,6 @@ export default function AdminPanel() {
                     <p className="text-sm p-2 bg-gray-50 rounded mt-1">{selectedEnquiry.notes}</p>
                   </div>
                 )}
-                
-                {selectedEnquiry.admin_notes && (
-                  <div>
-                    <h3 className="text-sm text-gray-500">Admin Notes</h3>
-                    <p className="text-sm p-2 bg-yellow-50 rounded mt-1">{selectedEnquiry.admin_notes}</p>
-                  </div>
-                )}
-                
-                <div>
-                  <h3 className="text-sm text-gray-500">Add Admin Notes</h3>
-                  <textarea
-                    value={enquiryNote}
-                    onChange={(e) => setEnquiryNote(e.target.value)}
-                    placeholder="Add private notes about this enquiry..."
-                    rows={3}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-pink-500 focus:ring-pink-500"
-                  />
-                  <button
-                    onClick={addEnquiryNote}
-                    className="mt-2 px-3 py-1 bg-gray-100 text-gray-800 rounded hover:bg-gray-200"
-                  >
-                    Save Note
-                  </button>
-                </div>
               </div>
             </div>
           </div>
@@ -880,18 +991,8 @@ export default function AdminPanel() {
               
               <p className="mb-4">
                 You are about to reject the enquiry from <span className="font-medium">{selectedEnquiry.client_name}</span>.
-                Do you want to provide a reason for rejection?
+                Are you sure?
               </p>
-              
-              <div className="mb-4">
-                <textarea
-                  value={rejectionReason}
-                  onChange={(e) => setRejectionReason(e.target.value)}
-                  placeholder="Reason for rejection (optional)"
-                  rows={3}
-                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-pink-500 focus:ring-pink-500"
-                />
-              </div>
               
               <div className="flex space-x-3 justify-end">
                 <button
@@ -925,8 +1026,67 @@ export default function AdminPanel() {
       <div>
         <h2 className="text-xl font-semibold mb-4">Manage Time Slots</h2>
         
+        {/* Bulk Time Slot Generation */}
         <div className="bg-white p-6 rounded-lg shadow mb-6">
-          <h3 className="text-lg font-semibold mb-4">Add New Time Slot</h3>
+          <h3 className="text-lg font-semibold mb-4">Bulk Generate Time Slots</h3>
+          
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                <input
+                  type="date"
+                  value={bulkStartDate}
+                  onChange={(e) => setBulkStartDate(e.target.value)}
+                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-pink-500 focus:ring-pink-500"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+                <input
+                  type="date"
+                  value={bulkEndDate}
+                  onChange={(e) => setBulkEndDate(e.target.value)}
+                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-pink-500 focus:ring-pink-500"
+                />
+              </div>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Service Type</label>
+              <select
+                value={selectedServiceType}
+                onChange={(e) => setSelectedServiceType(e.target.value)}
+                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-pink-500 focus:ring-pink-500"
+              >
+                <option value="default">Regular Service (1h 30m)</option>
+                <option value="bridal">Bridal Service (2h)</option>
+              </select>
+            </div>
+            
+            <div className="text-sm text-gray-600 bg-gray-50 p-3 rounded-md">
+              <p className="font-medium">Time Slot Information:</p>
+              <ul className="list-disc list-inside mt-1">
+                <li>Regular services: 1 hour 30 minutes per slot</li>
+                <li>Bridal services: 2 hours per slot</li>
+                <li>Available times: 9:00, 11:00, 13:00, 15:00, 17:00</li>
+                <li>Time slots will be created for all days in the selected range</li>
+              </ul>
+            </div>
+            
+            <button
+              onClick={handleGenerateTimeSlots}
+              disabled={generating}
+              className="w-full px-4 py-2 bg-pink-600 text-white rounded-md hover:bg-pink-700 disabled:bg-pink-300"
+            >
+              {generating ? 'Generating...' : 'Generate Time Slots'}
+            </button>
+          </div>
+        </div>
+        
+        <div className="bg-white p-6 rounded-lg shadow mb-6">
+          <h3 className="text-lg font-semibold mb-4">Add Single Time Slot</h3>
           
           {editingTimeSlot ? (
             <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
@@ -1007,20 +1167,12 @@ export default function AdminPanel() {
                 </div>
               </div>
   
-              <div className="flex gap-2">
-                <button
-                  onClick={addTimeSlot}
-                  className="px-4 py-2 bg-pink-600 text-white rounded-md hover:bg-pink-700"
-                >
-                  Add Single Slot
-                </button>
-                <button
-                  onClick={addMultipleTimeSlots}
-                  className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700"
-                >
-                  Add For 7 Days
-                </button>
-              </div>
+              <button
+                onClick={addTimeSlot}
+                className="px-4 py-2 bg-pink-600 text-white rounded-md hover:bg-pink-700"
+              >
+                Add Single Slot
+              </button>
             </div>
           )}
         </div>
@@ -1028,12 +1180,60 @@ export default function AdminPanel() {
         <div className="bg-white p-6 rounded-lg shadow">
           <div className="mb-4">
             <label className="block text-sm font-medium text-gray-700 mb-2">Filter by date</label>
-            <input
-              type="date"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="block w-full rounded-md border-gray-300 shadow-sm focus:border-pink-500 focus:ring-pink-500"
-            />
+            
+            {/* Month Calendar for Date Selection */}
+            <div className="mb-4">
+              <div className="flex justify-between items-center mb-2">
+                <button 
+                  onClick={previousMonth}
+                  className="p-1 rounded hover:bg-gray-100"
+                >
+                  &lt; Prev
+                </button>
+                <h3 className="font-medium text-gray-700">
+                  {format(currentMonth, 'MMMM yyyy')}
+                </h3>
+                <button 
+                  onClick={nextMonth}
+                  className="p-1 rounded hover:bg-gray-100"
+                >
+                  Next &gt;
+                </button>
+              </div>
+              
+              <div className="grid grid-cols-7 gap-1 text-center">
+                {/* Day headers */}
+                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+                  <div key={day} className="text-xs font-medium text-gray-500 p-1">
+                    {day}
+                  </div>
+                ))}
+                
+                {/* Calendar days */}
+                {calendarDays.map((day, i) => {
+                  const isSelected = format(day, 'yyyy-MM-dd') === selectedDate;
+                  const isToday = isSameDay(day, new Date());
+                  
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => setSelectedDate(format(day, 'yyyy-MM-dd'))}
+                      className={`aspect-square p-1 text-sm rounded-md ${
+                        isSelected ? 'bg-pink-600 text-white' :
+                        isToday ? 'bg-pink-100 text-pink-700' :
+                        'hover:bg-gray-100'
+                      }`}
+                    >
+                      {format(day, 'd')}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            
+            <p className="text-center text-sm text-gray-500 mt-2">
+              Selected: <span className="font-medium">{format(new Date(selectedDate), 'EEEE, MMMM do, yyyy')}</span>
+            </p>
           </div>
           
           {isLoading.timeSlots ? (
@@ -1096,36 +1296,129 @@ export default function AdminPanel() {
         <h2 className="text-xl font-semibold mb-4">Manage Blocked Dates</h2>
         
         <div className="bg-white p-6 rounded-lg shadow mb-6">
-          <h3 className="text-lg font-semibold mb-4">Add Blocked Date</h3>
+          <h3 className="text-lg font-semibold mb-4">Add Blocked Date Range</h3>
           
           <div className="space-y-4 mb-4">
+            {/* Start Date Calendar */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Date to Block</label>
-              <input
-                type="date"
-                value={newBlockedDate.date}
-                onChange={(e) => setNewBlockedDate({ ...newBlockedDate, date: e.target.value })}
-                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-pink-500 focus:ring-pink-500"
-              />
+              <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+              
+              <div className="mb-4">
+                <div className="flex justify-between items-center mb-2">
+                  <button 
+                    onClick={previousMonth}
+                    className="p-1 rounded hover:bg-gray-100"
+                    type="button"
+                  >
+                    &lt; Prev
+                  </button>
+                  <h3 className="font-medium text-gray-700">
+                    {format(currentMonth, 'MMMM yyyy')}
+                  </h3>
+                  <button 
+                    onClick={nextMonth}
+                    className="p-1 rounded hover:bg-gray-100"
+                    type="button"
+                  >
+                    Next &gt;
+                  </button>
+                </div>
+                
+                <div className="grid grid-cols-7 gap-1 text-center">
+                  {/* Day headers */}
+                  {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+                    <div key={day} className="text-xs font-medium text-gray-500 p-1">
+                      {day}
+                    </div>
+                  ))}
+                  
+                  {/* Calendar days */}
+                  {calendarDays.map((day, i) => {
+                    const dateStr = format(day, 'yyyy-MM-dd');
+                    const isSelected = dateStr === newBlockedDate.date;
+                    const isToday = isSameDay(day, new Date());
+                    
+                    return (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => setNewBlockedDate({...newBlockedDate, date: dateStr})}
+                        className={`aspect-square p-1 text-sm rounded-md ${
+                          isSelected ? 'bg-pink-600 text-white' :
+                          isToday ? 'bg-pink-100 text-pink-700' :
+                          'hover:bg-gray-100'
+                        }`}
+                      >
+                        {format(day, 'd')}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              
+              <p className="text-center text-sm text-gray-500 mb-4">
+                Selected: <span className="font-medium">
+                  {newBlockedDate.date && isValid(parseISO(newBlockedDate.date)) ? 
+                    format(parseISO(newBlockedDate.date), 'EEEE, MMMM do, yyyy') : 
+                    'No date selected'}
+                </span>
+              </p>
+            </div>
+  
+            {/* End Date (Optional) */}
+            <div className="bg-gray-50 p-4 rounded-md">
+              <div className="flex items-center mb-2">
+                <input
+                  type="checkbox"
+                  id="blockRange"
+                  checked={blockDateRange}
+                  onChange={() => setBlockDateRange(!blockDateRange)}
+                  className="h-4 w-4 text-pink-600 rounded"
+                />
+                <label htmlFor="blockRange" className="ml-2 text-sm font-medium text-gray-700">
+                  Block a range of dates
+                </label>
+              </div>
+              
+              {blockDateRange && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+                  <input
+                    type="date"
+                    value={endBlockedDate}
+                    min={newBlockedDate.date} // Ensure end date is after start date
+                    onChange={(e) => setEndBlockedDate(e.target.value)}
+                    className="block w-full rounded-md border-gray-300 shadow-sm focus:border-pink-500 focus:ring-pink-500"
+                  />
+                  
+                  {endBlockedDate && isValid(parseISO(endBlockedDate)) && newBlockedDate.date && isValid(parseISO(newBlockedDate.date)) && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      This will block all dates from {format(parseISO(newBlockedDate.date), 'MMM d, yyyy')} 
+                      to {format(parseISO(endBlockedDate), 'MMM d, yyyy')} inclusive.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
             
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Reason (Optional)</label>
               <input
                 type="text"
-                placeholder="Why is this date blocked?"
+                placeholder="Why are these dates blocked?"
                 value={newBlockedDate.reason}
                 onChange={(e) => setNewBlockedDate({ ...newBlockedDate, reason: e.target.value })}
                 className="block w-full rounded-md border-gray-300 shadow-sm focus:border-pink-500 focus:ring-pink-500"
               />
             </div>
           </div>
-
+  
           <button
-            onClick={addBlockedDate}
-            className="px-4 py-2 bg-pink-600 text-white rounded-md hover:bg-pink-700 w-full"
+            onClick={blockDateRange ? addBlockedDateRange : addBlockedDate}
+            disabled={!newBlockedDate.date || (blockDateRange && !endBlockedDate)}
+            className="px-4 py-2 bg-pink-600 text-white rounded-md hover:bg-pink-700 w-full disabled:bg-pink-300 disabled:cursor-not-allowed"
           >
-            Block Date
+            {blockDateRange ? 'Block Date Range' : 'Block Date'}
           </button>
         </div>
         
@@ -1139,7 +1432,11 @@ export default function AdminPanel() {
               {blockedDates.map((date) => (
                 <div key={date.id} className="flex justify-between items-center p-2 bg-gray-50 rounded">
                   <div>
-                    <span className="font-medium">{format(new Date(date.date), 'EEEE, MMMM d, yyyy')}</span>
+                    <span className="font-medium">
+                      {date.date && isValid(parseISO(date.date)) ? 
+                        format(parseISO(date.date), 'EEEE, MMMM d, yyyy') : 
+                        date.date}
+                    </span>
                     {date.reason && <span className="ml-2 text-sm text-gray-500">- {date.reason}</span>}
                   </div>
                   <button
