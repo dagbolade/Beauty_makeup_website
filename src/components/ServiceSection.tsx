@@ -58,7 +58,7 @@ export default function ServiceSection() {
                           onClick={() => handleBooking(service, option.name)}
                           className="text-sm bg-pink-600 text-white px-3 py-1 rounded-full hover:bg-pink-700 transition-colors"
                         >
-                          Book
+                          Enquire
                         </button>
                       </div>
                     </div>

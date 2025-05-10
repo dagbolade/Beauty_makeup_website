@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase';
 import type { TimeSlot } from '../types';
 import toast from 'react-hot-toast';
 
-interface BookingModalProps {
+interface EnquiryModalProps {
   isOpen: boolean;
   onClose: () => void;
   serviceId: string;
@@ -13,7 +13,7 @@ interface BookingModalProps {
   serviceOption: string;
 }
 
-export default function BookingModal({ isOpen, onClose, serviceId, serviceName, serviceOption }: BookingModalProps) {
+export default function EnquiryModal({ isOpen, onClose, serviceId, serviceName, serviceOption }: EnquiryModalProps) {
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
   const [selectedSlot, setSelectedSlot] = useState<string>('');
@@ -92,7 +92,7 @@ export default function BookingModal({ isOpen, onClose, serviceId, serviceName, 
       });
     } catch (error) {
       console.error('Failed to send email:', error);
-      // Don't show error to user since booking was successful
+      // Don't show error to user since enquiry was successful
     }
   };
 
@@ -126,12 +126,12 @@ export default function BookingModal({ isOpen, onClose, serviceId, serviceName, 
 
       // Create the booking
       const { data, error } = await supabase
-        .from('bookings')
+        .from('enquiries')
         .insert([
           {
             service_type_id: serviceId,
             service_option: serviceOption,
-            booking_date: format(selectedDate, 'yyyy-MM-dd'),
+            enquiry_date: format(selectedDate, 'yyyy-MM-dd'),
             time_slot_id: selectedSlot,
             client_name: formData.name,
             client_email: formData.email,
@@ -219,8 +219,8 @@ export default function BookingModal({ isOpen, onClose, serviceId, serviceName, 
             <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
               <CheckCircle size={40} className="text-green-500" />
             </div>
-            <h2 className="text-2xl font-bold text-green-700">Booking Confirmed!</h2>
-            <p className="text-gray-600 mt-1">Your appointment has been scheduled successfully.</p>
+            <h2 className="text-2xl font-bold text-green-700">Enquiry Confirmed!</h2>
+            <p className="text-gray-600 mt-1">Your enquiry has been sent successfully.</p>
           </div>
 
           <div className="border-t border-b border-gray-200 py-4 my-4">
@@ -260,12 +260,12 @@ export default function BookingModal({ isOpen, onClose, serviceId, serviceName, 
     );
   }
 
-  // Regular booking form
+  // Regular Enquiry form
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg p-6 max-w-md w-full">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-2xl font-bold">Book {serviceName}</h2>
+          <h2 className="text-2xl font-bold">Enquire about {serviceName}</h2>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
             <X size={24} />
           </button>
@@ -372,7 +372,7 @@ export default function BookingModal({ isOpen, onClose, serviceId, serviceName, 
               }`}
               disabled={isLoading || !selectedSlot}
             >
-              {isLoading ? 'Processing...' : 'Book Appointment'}
+              {isLoading ? 'Processing...' : 'Submit Enquiry'}
             </button>
           </div>
         </form>
