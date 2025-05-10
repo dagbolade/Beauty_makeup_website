@@ -20,6 +20,8 @@ export default function AdminPanel() {
   const [editingTimeSlot, setEditingTimeSlot] = useState(null);
   const [selectedEnquiry, setSelectedEnquiry] = useState(null);
   const [enquiryNote, setEnquiryNote] = useState('');
+  const [rejectionReason, setRejectionReason] = useState('');
+  const [showRejectionModal, setShowRejectionModal] = useState(false);
   
   // UI state
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -60,9 +62,9 @@ export default function AdminPanel() {
     // Current date for today's enquiries comparison
     const today = format(new Date(), 'yyyy-MM-dd');
     
-    const pendingCount = enquiries.filter(b => b.status === 'pending').length;
-    const confirmedCount = enquiries.filter(b => b.status === 'confirmed').length;
-    const todayCount = enquiries.filter(b => b.booking_date === today).length;
+    const pendingCount = enquiries.filter(e => e.status === 'pending').length;
+    const confirmedCount = enquiries.filter(e => e.status === 'confirmed').length;
+    const todayCount = enquiries.filter(e => e.enquiry_date === today).length;
     
     setDashboardStats({
       pendingEnquiries: pendingCount,
@@ -95,53 +97,69 @@ export default function AdminPanel() {
   const fetchEnquiries = async () => {
     setIsLoading(prevState => ({ ...prevState, enquiries: true }));
     try {
-      // Simple query to get all enquiries
-      const { data, error } = await supabase
-        .from('bookings') // Keep table name as 'bookings' but rename in UI
-        .select('*')
-        .order('booking_date', { ascending: false });
-
-      if (error) {
-        throw error;
-      }
-
-      console.log('Raw enquiries data:', data);
+      console.log('Fetching enquiries from database...');
       
-      // Process the data if needed
-      if (data && data.length > 0) {
-        // Get time slot details for better display
-        const enhancedEnquiries = await Promise.all(
-          data.map(async (enquiry) => {
-            try {
-              const { data: timeSlotData, error: timeSlotError } = await supabase
-                .from('time_slots')
-                .select('*')
-                .eq('id', enquiry.time_slot_id)
-                .single();
-              
-              if (timeSlotError) {
-                console.warn(`Error fetching time slot for enquiry ${enquiry.id}:`, timeSlotError);
-                return enquiry;
-              }
-              
-              return {
-                ...enquiry,
-                timeSlot: timeSlotData
-              };
-            } catch (err) {
-              console.error('Error processing enquiry:', err);
-              return enquiry;
-            }
-          })
-        );
-        
-        setEnquiries(enhancedEnquiries);
-      } else {
+      // Get all enquiries
+      const { data, error } = await supabase
+        .from('enquiries')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      console.log('Supabase response:', { data, error });
+      
+      if (error) {
+        console.error('Error fetching enquiries:', error);
+        toast.error('Failed to load enquiries');
         setEnquiries([]);
+        return;
+      }
+      
+      // Now fetch all time slots in a single query
+      const { data: allTimeSlots, error: timeSlotsError } = await supabase
+        .from('time_slots')
+        .select('*');
+        
+      if (timeSlotsError) {
+        console.error('Error fetching time slots for enquiries:', timeSlotsError);
+      }
+      
+      // Create a map of time slot IDs to time slot objects for quick lookup
+      const timeSlotsMap = {};
+      if (allTimeSlots) {
+        allTimeSlots.forEach(slot => {
+          timeSlotsMap[slot.id] = slot;
+        });
+      }
+      
+      // Merge enquiries with their time slot data
+      const enhancedEnquiries = data.map(enquiry => {
+        return {
+          ...enquiry,
+          timeSlot: timeSlotsMap[enquiry.time_slot_id] || null
+        };
+      });
+      
+      console.log(`Successfully fetched ${enhancedEnquiries.length} enquiries with time slot data:`, enhancedEnquiries);
+      setEnquiries(enhancedEnquiries);
+      
+      // Update dashboard stats
+      if (enhancedEnquiries.length > 0) {
+        const today = format(new Date(), 'yyyy-MM-dd');
+        const pendingCount = enhancedEnquiries.filter(e => e.status === 'pending').length;
+        const confirmedCount = enhancedEnquiries.filter(e => e.status === 'confirmed').length;
+        const todayCount = enhancedEnquiries.filter(e => e.enquiry_date === today).length;
+        
+        setDashboardStats({
+          pendingEnquiries: pendingCount,
+          confirmedEnquiries: confirmedCount,
+          todayEnquiries: todayCount,
+          totalEnquiries: enhancedEnquiries.length
+        });
       }
     } catch (error) {
-      console.error('Error fetching enquiries:', error);
+      console.error('Exception in fetchEnquiries:', error);
       toast.error('Failed to load enquiries');
+      setEnquiries([]);
     } finally {
       setIsLoading(prevState => ({ ...prevState, enquiries: false }));
     }
@@ -157,9 +175,6 @@ export default function AdminPanel() {
 
       if (error) throw error;
       setBlockedDates(data || []);
-    } catch (error) {
-      console.error('Error fetching blocked dates:', error);
-      toast.error('Failed to load blocked dates');
     } finally {
       setIsLoading(prevState => ({ ...prevState, blockedDates: false }));
     }
@@ -341,30 +356,69 @@ export default function AdminPanel() {
     }
   };
 
-  // Enquiry management
+  // Enquiry management with manual slot confirmation
   const updateEnquiryStatus = async (id, status) => {
     try {
+      // Only update the status field
       const { error } = await supabase
-        .from('bookings') // Keep table name as 'bookings'
+        .from('enquiries')
         .update({ status })
         .eq('id', id);
-
+  
       if (error) throw error;
-
-      // If cancelling, also make the time slot available again
-      if (status === 'cancelled') {
-        const enquiry = enquiries.find(e => e.id === id);
-        if (enquiry) {
+  
+      // Get the full enquiry details to access the time slot
+      const { data: enquiryData, error: enquiryError } = await supabase
+        .from('enquiries')
+        .select('*')
+        .eq('id', id)
+        .single();
+        
+      if (enquiryError) {
+        console.error('Error fetching enquiry details:', enquiryError);
+      } else {
+        // Handle time slot based on the new status
+        if (status === 'confirmed') {
+          // When an enquiry is confirmed, mark its time slot as unavailable
+          await supabase
+            .from('time_slots')
+            .update({ is_available: false })
+            .eq('id', enquiryData.time_slot_id);
+            
+          console.log(`Time slot ${enquiryData.time_slot_id} marked as unavailable after confirmation`);
+          
+          // Handle conflicting enquiries
+          const { data: conflictingEnquiries } = await supabase
+            .from('enquiries')
+            .select('id')
+            .eq('time_slot_id', enquiryData.time_slot_id)
+            .neq('id', id)
+            .eq('status', 'pending');
+            
+          if (conflictingEnquiries?.length > 0) {
+            // Only update status field, no admin_notes
+            await supabase
+              .from('enquiries')
+              .update({ status: 'cancelled' })
+              .in('id', conflictingEnquiries.map(e => e.id));
+              
+            console.log(`${conflictingEnquiries.length} conflicting enquiries automatically cancelled`);
+          }
+        } 
+        else if (status === 'cancelled' && enquiryData.status === 'confirmed') {
+          // If a previously confirmed enquiry is cancelled, free up the time slot again
           await supabase
             .from('time_slots')
             .update({ is_available: true })
-            .eq('id', enquiry.time_slot_id);
+            .eq('id', enquiryData.time_slot_id);
+            
+          console.log(`Time slot ${enquiryData.time_slot_id} marked as available after cancellation`);
         }
       }
-
+  
       toast.success('Enquiry status updated successfully');
       fetchEnquiries();
-      fetchTimeSlots();
+      fetchTimeSlots(); // Refresh time slots to show updated availability
     } catch (error) {
       console.error('Error updating enquiry status:', error);
       toast.error('Failed to update enquiry status');
@@ -376,7 +430,7 @@ export default function AdminPanel() {
     
     try {
       const { error } = await supabase
-        .from('bookings') // Keep table name as 'bookings'
+        .from('enquiries')
         .update({ 
           admin_notes: enquiryNote,
           updated_at: new Date().toISOString()
@@ -395,6 +449,94 @@ export default function AdminPanel() {
     }
   };
 
+  const confirmEnquiryWithTimeSlot = async (enquiryId) => {
+    try {
+      // Get the enquiry first to get its time slot
+      const { data: enquiry, error: enquiryError } = await supabase
+        .from('enquiries')
+        .select('*')
+        .eq('id', enquiryId)
+        .single();
+        
+      if (enquiryError) throw enquiryError;
+      
+      // Check if the time slot is still available
+      const { data: timeSlot, error: timeSlotError } = await supabase
+        .from('time_slots')
+        .select('*')
+        .eq('id', enquiry.time_slot_id)
+        .single();
+        
+      if (timeSlotError) throw timeSlotError;
+      
+      if (!timeSlot.is_available) {
+        toast.error('This time slot is no longer available. Please select a different time slot.');
+        return;
+      }
+      
+      // First, update the enquiry to confirmed status
+      const { error: updateError } = await supabase
+        .from('enquiries')
+        .update({ status: 'confirmed' })
+        .eq('id', enquiryId);
+        
+      if (updateError) throw updateError;
+      
+      // Then, mark the time slot as unavailable
+      const { error: slotError } = await supabase
+        .from('time_slots')
+        .update({ is_available: false })
+        .eq('id', enquiry.time_slot_id);
+        
+      if (slotError) throw slotError;
+      
+      // Handle conflicting enquiries
+      const { data: conflictingEnquiries } = await supabase
+        .from('enquiries')
+        .select('id')
+        .eq('time_slot_id', enquiry.time_slot_id)
+        .neq('id', enquiryId)
+        .eq('status', 'pending');
+        
+      if (conflictingEnquiries?.length > 0) {
+        // Auto-reject all conflicting enquiries
+        await supabase
+          .from('enquiries')
+          .update({ status: 'cancelled' })
+          .in('id', conflictingEnquiries.map(e => e.id));
+          
+        console.log(`${conflictingEnquiries.length} conflicting enquiries automatically cancelled`);
+      }
+      
+      toast.success('Enquiry confirmed successfully');
+      fetchEnquiries();
+      fetchTimeSlots();
+    } catch (error) {
+      console.error('Error confirming enquiry:', error);
+      toast.error('Failed to confirm enquiry');
+    }
+  };
+
+  const rejectEnquiry = async (enquiryId) => {
+    try {
+      // Update the enquiry to cancelled status
+      const { error } = await supabase
+        .from('enquiries')
+        .update({ status: 'cancelled' })
+        .eq('id', enquiryId);
+        
+      if (error) throw error;
+      
+      toast.success('Enquiry rejected successfully');
+      fetchEnquiries();
+      setShowRejectionModal(false);
+      setRejectionReason(''); 
+    } catch (error) {
+      console.error('Error rejecting enquiry:', error);
+      toast.error('Failed to reject enquiry');
+    }
+  };
+
   // Debug function
   const debugAdminPanel = () => {
     console.log('=== ADMIN PANEL DEBUG ===');
@@ -406,7 +548,7 @@ export default function AdminPanel() {
     
     // Check if Supabase is working
     supabase
-      .from('bookings') // Keep table name as 'bookings'
+      .from('enquiries')
       .select('count')
       .then(({ data, error }) => {
         if (error) {
@@ -483,7 +625,7 @@ export default function AdminPanel() {
                     <div>
                       <p className="font-medium">{enquiry.client_name}</p>
                       <p className="text-sm text-gray-500">
-                        {format(new Date(enquiry.booking_date), 'MMM dd, yyyy')}
+                        {format(new Date(enquiry.enquiry_date), 'MMM dd, yyyy')}
                       </p>
                     </div>
                     <span className={`px-2 py-1 h-fit rounded-full text-xs font-medium ${
@@ -538,7 +680,7 @@ export default function AdminPanel() {
                   {enquiries.map((enquiry) => (
                     <tr key={enquiry.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setSelectedEnquiry(enquiry)}>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        {format(new Date(enquiry.booking_date), 'MMM dd, yyyy')}
+                        {format(new Date(enquiry.enquiry_date), 'MMM dd, yyyy')}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         {enquiry.timeSlot ? 
@@ -565,17 +707,43 @@ export default function AdminPanel() {
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <select
-                          value={enquiry.status}
-                          onChange={(e) => updateEnquiryStatus(enquiry.id, e.target.value)}
-                          onClick={(e) => e.stopPropagation()}
-                          className="rounded-md border-gray-300 shadow-sm focus:border-pink-500 focus:ring-pink-500"
-                        >
-                          <option value="pending">Pending</option>
-                          <option value="confirmed">Confirmed</option>
-                          <option value="cancelled">Cancelled</option>
-                          <option value="completed">Completed</option>
-                        </select>
+                        <div className="flex space-x-2" onClick={(e) => e.stopPropagation()}>
+                          {enquiry.status === 'pending' && (
+                            <>
+                              <button
+                                onClick={() => confirmEnquiryWithTimeSlot(enquiry.id)}
+                                className="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700"
+                              >
+                                Confirm
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setSelectedEnquiry(enquiry);
+                                  setShowRejectionModal(true);
+                                }}
+                                className="px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
+                              >
+                                Reject
+                              </button>
+                            </>
+                          )}
+                          {enquiry.status === 'confirmed' && (
+                            <button
+                              onClick={() => updateEnquiryStatus(enquiry.id, 'completed')}
+                              className="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
+                            >
+                              Complete
+                            </button>
+                          )}
+                          {enquiry.status !== 'cancelled' && (
+                            <button
+                              onClick={() => updateEnquiryStatus(enquiry.id, 'cancelled')}
+                              className="px-2 py-1 bg-gray-600 text-white text-xs rounded hover:bg-gray-700"
+                            >
+                              Cancel
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -586,7 +754,7 @@ export default function AdminPanel() {
         )}
         
         {/* Enquiry Details Modal */}
-        {selectedEnquiry && (
+        {selectedEnquiry && !showRejectionModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
             <div className="bg-white rounded-lg p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-4">
@@ -601,7 +769,7 @@ export default function AdminPanel() {
 
               <div className="space-y-4">
                 <div>
-                  <h3 className="text-sm text-gray-500">Client</h3>
+                <h3 className="text-sm text-gray-500">Client</h3>
                   <p className="font-medium">{selectedEnquiry.client_name}</p>
                   <p className="text-sm">{selectedEnquiry.client_email}</p>
                   <p className="text-sm">{selectedEnquiry.client_phone}</p>
@@ -615,7 +783,7 @@ export default function AdminPanel() {
                 <div>
                   <h3 className="text-sm text-gray-500">Date & Time</h3>
                   <p className="font-medium">
-                    {format(new Date(selectedEnquiry.booking_date), 'EEEE, MMMM do, yyyy')} at{' '}
+                    {format(new Date(selectedEnquiry.enquiry_date), 'EEEE, MMMM do, yyyy')} at{' '}
                     {selectedEnquiry.timeSlot ? 
                       `${selectedEnquiry.timeSlot.start_time}` : 
                       selectedEnquiry.time_slot_id}
@@ -624,27 +792,56 @@ export default function AdminPanel() {
                 
                 <div>
                   <h3 className="text-sm text-gray-500">Status</h3>
-                  <select
-                    value={selectedEnquiry.status}
-                    onChange={(e) => updateEnquiryStatus(selectedEnquiry.id, e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-pink-500 focus:ring-pink-500"
-                  >
-                    <option value="pending">Pending</option>
-                    <option value="confirmed">Confirmed</option>
-                    <option value="cancelled">Cancelled</option>
-                    <option value="completed">Completed</option>
-                  </select>
+                  <div className="flex items-center space-x-2 mt-1">
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                      selectedEnquiry.status === 'confirmed' ? 'bg-green-100 text-green-800' :
+                      selectedEnquiry.status === 'cancelled' ? 'bg-red-100 text-red-800' :
+                      selectedEnquiry.status === 'completed' ? 'bg-blue-100 text-blue-800' :
+                      'bg-yellow-100 text-yellow-800'
+                    }`}>
+                      {selectedEnquiry.status}
+                    </span>
+                    
+                    {selectedEnquiry.status === 'pending' && (
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={() => {
+                            confirmEnquiryWithTimeSlot(selectedEnquiry.id);
+                            setSelectedEnquiry(null);
+                          }}
+                          className="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700"
+                        >
+                          Confirm
+                        </button>
+                        <button
+                          onClick={() => {
+                            setShowRejectionModal(true);
+                          }}
+                          className="px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 
                 {selectedEnquiry.notes && (
                   <div>
                     <h3 className="text-sm text-gray-500">Client Notes</h3>
-                    <p className="text-sm">{selectedEnquiry.notes}</p>
+                    <p className="text-sm p-2 bg-gray-50 rounded mt-1">{selectedEnquiry.notes}</p>
+                  </div>
+                )}
+                
+                {selectedEnquiry.admin_notes && (
+                  <div>
+                    <h3 className="text-sm text-gray-500">Admin Notes</h3>
+                    <p className="text-sm p-2 bg-yellow-50 rounded mt-1">{selectedEnquiry.admin_notes}</p>
                   </div>
                 )}
                 
                 <div>
-                  <h3 className="text-sm text-gray-500">Admin Notes</h3>
+                  <h3 className="text-sm text-gray-500">Add Admin Notes</h3>
                   <textarea
                     value={enquiryNote}
                     onChange={(e) => setEnquiryNote(e.target.value)}
@@ -659,6 +856,62 @@ export default function AdminPanel() {
                     Save Note
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {/* Rejection Modal */}
+        {showRejectionModal && selectedEnquiry && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg p-6 max-w-md w-full">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-bold">Reject Enquiry</h2>
+                <button 
+                  onClick={() => {
+                    setShowRejectionModal(false);
+                    setRejectionReason('');
+                  }} 
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  &times;
+                </button>
+              </div>
+              
+              <p className="mb-4">
+                You are about to reject the enquiry from <span className="font-medium">{selectedEnquiry.client_name}</span>.
+                Do you want to provide a reason for rejection?
+              </p>
+              
+              <div className="mb-4">
+                <textarea
+                  value={rejectionReason}
+                  onChange={(e) => setRejectionReason(e.target.value)}
+                  placeholder="Reason for rejection (optional)"
+                  rows={3}
+                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-pink-500 focus:ring-pink-500"
+                />
+              </div>
+              
+              <div className="flex space-x-3 justify-end">
+                <button
+                  onClick={() => {
+                    setShowRejectionModal(false);
+                    setRejectionReason('');
+                  }}
+                  className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    rejectEnquiry(selectedEnquiry.id);
+                    setSelectedEnquiry(null);
+                  }}
+                  className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
+                >
+                  Reject Enquiry
+                </button>
               </div>
             </div>
           </div>
@@ -744,7 +997,7 @@ export default function AdminPanel() {
                   />
                 </div>
                 <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">End Time</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">End Time</label>
                   <input
                     type="time"
                     value={newTimeSlot.end_time}

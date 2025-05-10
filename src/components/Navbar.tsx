@@ -55,7 +55,7 @@ export default function Navbar() {
               className="bg-pink-600 text-white px-4 py-2 rounded-full text-sm hover:bg-pink-700 transition-colors flex items-center"
             >
               <Calendar size={16} className="mr-2" />
-              Book Now
+              Enquire Now
             </Link>
             <button 
               className="md:hidden text-gray-700"

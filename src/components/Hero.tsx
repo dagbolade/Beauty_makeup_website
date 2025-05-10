@@ -20,7 +20,12 @@ const slides = [
     image: getPublicImageUrl('yemisi-artistry/kanyin1.JPG'),
     title: "Professional Photoshoots",
     subtitle: "Capture Your Beautiful Moments"
-  }
+  },
+  {
+    image: getPublicImageUrl('yemisi-artistry/kanyin.PNG'),
+    title: "Our Passion for Beauty",
+    subtitle: "Transforming You into Your Best Self"
+  },
 ];
 
 export default function Hero() {
@@ -50,9 +55,9 @@ export default function Hero() {
                 <div className="text-white max-w-3xl px-4">
                   <h1 className="text-5xl md:text-6xl font-bold mb-4">{slide.title}</h1>
                   <p className="text-xl md:text-2xl mb-8">{slide.subtitle}</p>
-                  <p className="text-lg mb-8">Specializing in flawless, long-lasting makeup for all occasions, ensuring you look and feel your best.</p>
+                  <p className="text-lg mb-8">Specialising in flawless, long-lasting makeup for all occasions, ensuring you look and feel your best.</p>
                   <button className="bg-pink-600 text-white px-8 py-3 rounded-full text-lg font-semibold hover:bg-pink-700 transition-colors">
-                    Book Appointment
+                    Make Enquiries
                   </button>
                 </div>
               </div>

@@ -34,21 +34,6 @@ CREATE TABLE IF NOT EXISTS time_slots (
   created_at timestamptz DEFAULT now()
 );
 
--- Create bookings table
-CREATE TABLE IF NOT EXISTS bookings (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid REFERENCES auth.users(id),
-  service_type_id uuid REFERENCES service_types(id),
-  service_option text NOT NULL,
-  booking_date date NOT NULL,
-  time_slot_id uuid REFERENCES time_slots(id),
-  client_name text NOT NULL,
-  client_email text NOT NULL,
-  client_phone text,
-  status text DEFAULT 'pending',
-  notes text,
-  created_at timestamptz DEFAULT now()
-);
 
 -- Create blocked_dates table
 CREATE TABLE IF NOT EXISTS blocked_dates (

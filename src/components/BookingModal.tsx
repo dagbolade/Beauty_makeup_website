@@ -19,7 +19,7 @@ export default function EnquiryModal({ isOpen, onClose, serviceId, serviceName, 
   const [selectedSlot, setSelectedSlot] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [showConfirmation, setShowConfirmation] = useState<boolean>(false);
-  const [bookingDetails, setBookingDetails] = useState<any>(null);
+  const [enquiryDetails, setEnquiryDetails] = useState<any>(null);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -40,12 +40,11 @@ export default function EnquiryModal({ isOpen, onClose, serviceId, serviceName, 
     const formattedDate = format(selectedDate, 'yyyy-MM-dd');
     
     try {
-      // Important: This query MUST filter for is_available = true
       const { data, error } = await supabase
         .from('time_slots')
         .select('*')
         .eq('slot_date', formattedDate)
-        .eq('is_available', true) // This ensures only available slots are shown
+        .eq('is_available', true)
         .order('start_time');
 
       if (error) {
@@ -74,10 +73,8 @@ export default function EnquiryModal({ isOpen, onClose, serviceId, serviceName, 
     clientInfo?: any
   ) => {
     try {
-      const isClient = recipient !== "yemisiartistry@example.com";
-      const emailTemplate = isClient ? 
-        `Your appointment for ${serviceOption} (${serviceName}) is confirmed for ${format(date, 'EEEE, MMMM do, yyyy')} at ${time}.` :
-        `New booking: ${clientInfo?.name} (${clientInfo?.email}, ${clientInfo?.phone}) has booked ${serviceOption} (${serviceName}) for ${format(date, 'EEEE, MMMM do, yyyy')} at ${time}. ${clientInfo?.notes ? `Notes: ${clientInfo.notes}` : ''}`;
+      const isClient = recipient !== "dagbolade72@gmail.com";
+      const formattedDate = format(date, 'EEEE, MMMM do, yyyy');
       
       await fetch('/api/send-email', {
         method: 'POST',
@@ -86,8 +83,18 @@ export default function EnquiryModal({ isOpen, onClose, serviceId, serviceName, 
         },
         body: JSON.stringify({
           to: recipient,
-          subject: isClient ? `Booking Confirmation for ${serviceName}` : `New Booking: ${serviceName}`,
-          text: emailTemplate
+          subject: isClient ? `Enquiry Confirmation for ${serviceName}` : `New Enquiry: ${serviceName}`,
+          template: isClient ? 'client-confirmation' : 'business-notification',
+          data: {
+            clientName: formData.name,
+            clientEmail: formData.email,
+            clientPhone: formData.phone,
+            serviceName: serviceName,
+            serviceOption: serviceOption,
+            date: formattedDate,
+            time: time,
+            notes: formData.notes
+          }
         })
       });
     } catch (error) {
@@ -108,7 +115,7 @@ export default function EnquiryModal({ isOpen, onClose, serviceId, serviceName, 
     setIsLoading(true);
 
     try {
-      // Double-check that this time slot is still available
+      // Double-check that this time slot exists
       const { data: slotCheck, error: slotCheckError } = await supabase
         .from('time_slots')
         .select('*')
@@ -118,13 +125,13 @@ export default function EnquiryModal({ isOpen, onClose, serviceId, serviceName, 
       
       if (slotCheckError || !slotCheck) {
         toast.error('This time slot is no longer available. Please select another time.');
-        await fetchTimeSlots(); // Refresh available slots
+        await fetchTimeSlots();
         setSelectedSlot('');
         setIsLoading(false);
         return;
       }
 
-      // Create the booking
+      // Create the enquiry
       const { data, error } = await supabase
         .from('enquiries')
         .insert([
@@ -142,30 +149,17 @@ export default function EnquiryModal({ isOpen, onClose, serviceId, serviceName, 
         ]);
 
       if (error) {
-        console.error('Error creating booking:', error);
-        toast.error('Failed to create booking');
+        console.error('Error creating enquiry:', error);
+        toast.error('Failed to submit enquiry');
         setIsLoading(false);
         return;
-      }
-
-      // CRITICAL STEP: Mark the time slot as unavailable
-      const { error: updateError } = await supabase
-        .from('time_slots')
-        .update({ is_available: false })
-        .eq('id', selectedSlot);
-      
-      if (updateError) {
-        console.error('Error marking time slot as unavailable:', updateError);
-        // Continue anyway since the booking was created
-      } else {
-        console.log(`Time slot ${selectedSlot} marked as unavailable successfully`);
       }
 
       // Find the selected time slot info for the confirmation
       const selectedTimeSlotInfo = timeSlots.find(slot => slot.id === selectedSlot);
       
-      // Store booking details for confirmation screen
-      setBookingDetails({
+      // Store enquiry details for confirmation screen
+      setEnquiryDetails({
         name: formData.name,
         email: formData.email,
         phone: formData.phone,
@@ -176,21 +170,25 @@ export default function EnquiryModal({ isOpen, onClose, serviceId, serviceName, 
         option: serviceOption
       });
       
+      // IMPORTANT: Do NOT mark the time slot as unavailable
+      // Time slots remain available until manually confirmed by Yemisi
+      // This allows for multiple enquiries for the same time slot until confirmation
+
       // Send confirmation emails
       sendConfirmationEmail(formData.email, serviceName, serviceOption, selectedDate, selectedTimeSlotInfo?.start_time);
-      sendConfirmationEmail("yemisiartistry@example.com", serviceName, serviceOption, selectedDate, selectedTimeSlotInfo?.start_time, formData);
+      sendConfirmationEmail("dagbolade72@gmail.com", serviceName, serviceOption, selectedDate, selectedTimeSlotInfo?.start_time, formData);
 
       // Show confirmation screen
       setShowConfirmation(true);
     } catch (error) {
-      console.error('Unexpected error in booking process:', error);
+      console.error('Unexpected error in enquiry process:', error);
       toast.error('An unexpected error occurred');
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Handle closing after booking is complete
+  // Handle closing after enquiry is complete
   const handleCloseConfirmation = () => {
     // Reset everything
     setFormData({
@@ -201,17 +199,13 @@ export default function EnquiryModal({ isOpen, onClose, serviceId, serviceName, 
     });
     setSelectedSlot('');
     setShowConfirmation(false);
-    
-    // Refresh available time slots before closing (in case user wants to book again)
-    fetchTimeSlots();
-    
     onClose();
   };
 
   if (!isOpen) return null;
 
-  // Show confirmation screen if booking was successful
-  if (showConfirmation && bookingDetails) {
+  // Show confirmation screen if enquiry was successful
+  if (showConfirmation && enquiryDetails) {
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
         <div className="bg-white rounded-lg p-6 max-w-md w-full">
@@ -219,34 +213,37 @@ export default function EnquiryModal({ isOpen, onClose, serviceId, serviceName, 
             <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
               <CheckCircle size={40} className="text-green-500" />
             </div>
-            <h2 className="text-2xl font-bold text-green-700">Enquiry Confirmed!</h2>
-            <p className="text-gray-600 mt-1">Your enquiry has been sent successfully.</p>
+            <h2 className="text-2xl font-bold text-green-700">Enquiry Submitted!</h2>
+            <p className="text-gray-600 mt-1">Your enquiry has been received successfully.</p>
           </div>
 
           <div className="border-t border-b border-gray-200 py-4 my-4">
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <p className="text-sm text-gray-500">Service</p>
-                <p className="font-medium">{bookingDetails.service}</p>
+                <p className="font-medium">{enquiryDetails.service}</p>
               </div>
               <div>
                 <p className="text-sm text-gray-500">Option</p>
-                <p className="font-medium">{bookingDetails.option}</p>
+                <p className="font-medium">{enquiryDetails.option}</p>
               </div>
               <div>
                 <p className="text-sm text-gray-500">Date</p>
-                <p className="font-medium">{bookingDetails.date}</p>
+                <p className="font-medium">{enquiryDetails.date}</p>
               </div>
               <div>
                 <p className="text-sm text-gray-500">Time</p>
-                <p className="font-medium">{bookingDetails.time}</p>
+                <p className="font-medium">{enquiryDetails.time}</p>
               </div>
             </div>
           </div>
 
           <div className="text-center mt-6">
             <p className="text-sm text-gray-600 mb-4">
-              A confirmation email has been sent to {bookingDetails.email}
+              A confirmation email has been sent to {enquiryDetails.email}
+            </p>
+            <p className="text-sm text-gray-600 mb-4">
+              Yemisi will get back to you soon to confirm your appointment and discuss details.
             </p>
             <button
               onClick={handleCloseConfirmation}
@@ -260,7 +257,7 @@ export default function EnquiryModal({ isOpen, onClose, serviceId, serviceName, 
     );
   }
 
-  // Regular Enquiry form
+  // Regular enquiry form
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg p-6 max-w-md w-full">
