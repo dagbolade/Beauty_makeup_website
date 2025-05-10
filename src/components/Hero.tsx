@@ -3,20 +3,21 @@ import { Swiper, SwiperSlide } from 'swiper/react';
 import { Autoplay, Pagination } from 'swiper/modules';
 import 'swiper/css';
 import 'swiper/css/pagination';
+import { getPublicImageUrl } from '../lib/supabase';
 
 const slides = [
   {
-    image: "https://images.unsplash.com/photo-1457972729786-0411a3b2b626?ixlib=rb-1.2.1&auto=format&fit=crop&w=1920&q=80",
+    image: getPublicImageUrl('yemisi-artistry/oyin.JPG'),
     title: "Welcome to Yemisi Artistry",
     subtitle: "Where Beauty Meets Perfection"
   },
   {
-    image: "https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?ixlib=rb-1.2.1&auto=format&fit=crop&w=1920&q=80",
-    title: "Flawless Bridal Makeup",
+    image: getPublicImageUrl('yemisi-artistry/makeup.PNG'),
+    title: "Flawless Makeup",
     subtitle: "Your Special Day, Your Perfect Look"
   },
   {
-    image: "https://images.unsplash.com/photo-1526047932273-341f2a7631f9?ixlib=rb-1.2.1&auto=format&fit=crop&w=1920&q=80",
+    image: getPublicImageUrl('yemisi-artistry/kanyin1.JPG'),
     title: "Professional Photoshoots",
     subtitle: "Capture Your Beautiful Moments"
   }
@@ -38,6 +39,12 @@ export default function Hero() {
               className="relative h-full bg-cover bg-center"
               style={{ backgroundImage: `url(${slide.image})` }}
             >
+              <img 
+                src={slide.image} 
+                onError={(e) => e.currentTarget.src = '/fallback.jpg'} 
+                className="hidden" 
+                alt={slide.title} 
+              />
               <div className="absolute inset-0 bg-black bg-opacity-40" />
               <div className="absolute inset-0 flex items-center justify-center text-center">
                 <div className="text-white max-w-3xl px-4">
