@@ -57,8 +57,9 @@ export default function Hero() {
                   <p className="text-xl md:text-2xl mb-8">{slide.subtitle}</p>
                   <p className="text-lg mb-8">Specialising in flawless, long-lasting makeup for all occasions, ensuring you look and feel your best.</p>
                   <button className="bg-pink-600 text-white px-8 py-3 rounded-full text-lg font-semibold hover:bg-pink-700 transition-colors">
-                    Make Enquiries
+                    <a href="/services">Enquire Now</a>
                   </button>
+                
                 </div>
               </div>
             </div>
