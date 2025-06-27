@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build":  "vite build && cd admin && npm install && npm run build && cp -r dist ../dist/admin",
     "lint": "eslint .",
     "preview": "vite preview"
   },
