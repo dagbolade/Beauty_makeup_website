@@ -2,7 +2,7 @@
 
 const { Resend } = require('resend');
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+const resend = new Resend('re_f3M7Mrpe_YcybGbdNgo9n7NnMJX61SC3N');
 
 exports.handler = async (event, context) => {
   // Handle CORS
