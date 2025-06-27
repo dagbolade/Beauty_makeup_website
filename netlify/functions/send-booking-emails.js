@@ -229,15 +229,15 @@ exports.handler = async (event, context) => {
     const [adminResult, clientResult] = await Promise.all([
       // Admin notification
       resend.emails.send({
-        from: 'Yemisi Artistry <bookings@yemisiartistry.com>',
-        to: 'afolayanoyindamola33@gmail.com', // Yemisi's actual email
+        from: 'Yemisi Artistry <onboarding@resend.dev>', // ← Change this
+        to: 'afolayanoyindamola33@gmail.com',
         subject: adminSubject,
         html: adminEmailHtml,
       }),
       
       // Client confirmation
       resend.emails.send({
-        from: 'Yemisi Artistry <bookings@yemisiartistry.com>',
+        from: 'Yemisi Artistry <onboarding@resend.dev>',
         to: type === 'booking' ? enquiry.client_email : enquiry.email,
         subject: clientSubject,
         html: clientEmailHtml,
