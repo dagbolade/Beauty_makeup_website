@@ -2,12 +2,75 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Add this to your global CSS file or index.css */
+/* Swiper core styles - ensure these are loaded */
+.swiper {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+  list-style: none;
+  padding: 0;
+  z-index: 1;
+}
+
+.swiper-wrapper {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  display: flex;
+  transition-property: transform;
+  box-sizing: content-box;
+}
+
+.swiper-slide {
+  flex-shrink: 0;
+  width: 100%;
+  height: 100%;
+  position: relative;
+  transition-property: transform;
+}
+
+/* Hero container specific fixes */
+.hero-container {
+  width: 100% !important;
+  height: auto !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+
+.hero-container .swiper {
+  width: 100% !important;
+  height: 100% !important;
+  display: block !important;
+  position: relative !important;
+}
+
+.hero-container .swiper-wrapper {
+  width: 100% !important;
+  height: 100% !important;
+  display: flex !important;
+  position: relative !important;
+}
+
+.hero-container .swiper-slide {
+  width: 100% !important;
+  height: 100% !important;
+  display: flex !important;
+  position: relative !important;
+  flex-shrink: 0 !important;
+}
 
 /* Swiper pagination customization */
 .swiper-pagination {
+  position: absolute !important;
   bottom: 20px !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
   z-index: 30 !important;
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
 }
 
 .swiper-pagination-bullet {
@@ -16,7 +79,10 @@
   margin: 0 6px !important;
   opacity: 0.5 !important;
   background: white !important;
+  border-radius: 50% !important;
+  cursor: pointer !important;
   transition: all 0.3s ease !important;
+  display: inline-block !important;
 }
 
 .swiper-pagination-bullet-active {
@@ -26,15 +92,53 @@
 }
 
 /* Navigation buttons customization */
+.swiper-button-next,
+.swiper-button-prev {
+  position: absolute !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  z-index: 30 !important;
+  cursor: pointer !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 48px !important;
+  height: 48px !important;
+  margin-top: 0 !important;
+  background: rgba(255, 255, 255, 0.2) !important;
+  backdrop-filter: blur(8px) !important;
+  border-radius: 50% !important;
+  color: white !important;
+  transition: all 0.3s ease !important;
+}
+
+.swiper-button-next:hover,
+.swiper-button-prev:hover {
+  background: rgba(255, 255, 255, 0.3) !important;
+}
+
+.swiper-button-next {
+  right: 16px !important;
+}
+
+.swiper-button-prev {
+  left: 16px !important;
+}
+
 .swiper-button-next::after,
 .swiper-button-prev::after {
   font-size: 16px !important;
   font-weight: bold !important;
+  font-family: swiper-icons !important;
 }
 
-.swiper-button-next,
-.swiper-button-prev {
-  z-index: 30 !important;
+/* Ensure images display properly */
+.hero-container img {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  object-position: center !important;
+  display: block !important;
 }
 
 /* Responsive navigation buttons */
@@ -57,15 +161,16 @@
   }
 }
 
-/* Fix for Swiper container */
-.hero-container .swiper {
-  width: 100% !important;
-  height: 100% !important;
+/* Autoplay pause on hover */
+.hero-container:hover .swiper {
+  animation-play-state: paused;
 }
 
-.hero-container .swiper-slide {
+/* Force visibility for debugging */
+.hero-container .swiper-slide > div {
   width: 100% !important;
   height: 100% !important;
+  display: block !important;
 }
 
 @layer base {
