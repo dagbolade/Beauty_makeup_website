@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from "../lib/supabase";
 import toast from "react-hot-toast";
 import { format, addDays, addMonths, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, parseISO, isValid } from 'date-fns';
+import PortfolioImageManager from './PortfolioImageManager';
+
 
 export default function AdminPanel() {
   // State for different data types
@@ -663,6 +665,14 @@ const addBlockedDateRange = async () => {
   }
 };
 
+const renderPortfolio = () => {
+  return (
+    <div>
+      <PortfolioImageManager />
+    </div>
+  );
+};
+
   // Calendar navigation
   const previousMonth = () => {
     setCurrentMonth(prevMonth => addMonths(prevMonth, -1));
@@ -724,6 +734,12 @@ const addBlockedDateRange = async () => {
         >
           Blocked Dates
         </button>
+        <button 
+          className={`px-4 py-2 font-medium ${activeTab === 'portfolio' ? 'border-b-2 border-pink-500 text-pink-600' : 'text-gray-500 hover:text-gray-700'}`}
+          onClick={() => setActiveTab('portfolio')}
+        >
+          Portfolio
+      </button>
       </div>
     );
   };
@@ -1468,6 +1484,7 @@ const addBlockedDateRange = async () => {
       {activeTab === 'enquiries' && renderEnquiries()}
       {activeTab === 'time-slots' && renderTimeSlots()}
       {activeTab === 'blocked-dates' && renderBlockedDates()}
+      {activeTab === 'portfolio' && renderPortfolio()}
       
       {/* Debug button (can be removed in production) */}
       <button 
