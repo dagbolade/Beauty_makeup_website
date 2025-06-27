@@ -41,14 +41,16 @@ function App() {
                   <li><a href="/contact" className="text-gray-400 hover:text-white">Contact</a></li>
                 </ul>
               </div>
-              <div>
-                <h3 className="text-xl font-bold mb-4">Contact Us</h3>
-                <ul className="space-y-2 text-gray-400">
-                  <li>London, United Kingdom</li>
-                  <li>Email: info@yemisiartistry.com</li>
-                  <li>Instagram: @yemisiartistry</li>
-                </ul>
-              </div>
+              // Update the footer section
+            <div>
+              <h3 className="text-xl font-bold mb-4">Contact Us</h3>
+              <ul className="space-y-2 text-gray-400">
+                <li>London, United Kingdom</li>
+                <li>Phone: +44 7944 247941</li>
+                <li>Email: afolayanoyindamola33@gmail.com</li>
+                <li>Instagram: @artistrybyyemisi</li>
+              </ul>
+            </div>
             </div>
             <div className="mt-8 pt-8 border-t border-gray-800 text-center text-gray-400">
               <p>&copy; 2024 Yemisi Artistry. All rights reserved.</p>

@@ -4,24 +4,74 @@ import { Calendar, Clock, X, CheckCircle, ChevronLeft, ChevronRight } from 'luci
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
 
-const EnquiryModal = ({ isOpen, onClose, serviceId, serviceName, serviceOption }) => {
-  // Component state
-  const [selectedDate, setSelectedDate] = useState(new Date());
-  const [timeSlots, setTimeSlots] = useState([]);
-  const [selectedSlot, setSelectedSlot] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [formData, setFormData] = useState({
+// Type definitions matching your exact database schema
+interface TimeSlot {
+  id: string; // UUID
+  slot_date: string; // date
+  start_time: string; // time without time zone
+  end_time: string; // time without time zone
+  is_available: boolean;
+  created_at?: string;
+  // UI enhancement fields
+  formattedStartTime?: string;
+  formattedEndTime?: string;
+  durationText?: string;
+}
+
+interface EnquiryData {
+  id?: string; // UUID
+  user_id?: string; // UUID, nullable
+  service_type_id?: string; // UUID, nullable  
+  service_option: string;
+  enquiry_date: string; // Will be converted to date
+  time_slot_id?: string; // UUID, nullable
+  client_name: string;
+  client_email: string;
+  client_phone?: string; // nullable
+  notes?: string; // nullable
+  status?: string; // defaults to 'pending'
+  created_at?: string;
+}
+
+interface FormData {
+  name: string;
+  email: string;
+  phone: string;
+  notes: string;
+}
+
+interface EnquiryModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  serviceId?: number;
+  serviceName: string;
+  serviceOption: string;
+}
+
+const EnquiryModal: React.FC<EnquiryModalProps> = ({ 
+  isOpen, 
+  onClose, 
+  serviceId, 
+  serviceName, 
+  serviceOption 
+}) => {
+  // Component state with proper types
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
+  const [selectedSlot, setSelectedSlot] = useState<string>('');
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [formData, setFormData] = useState<FormData>({
     name: '',
     email: '',
     phone: '',
     notes: ''
   });
-  const [showConfirmation, setShowConfirmation] = useState(false);
+  const [showConfirmation, setShowConfirmation] = useState<boolean>(false);
   
   // Calendar state
-  const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [calendarDays, setCalendarDays] = useState([]);
-  
+  const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
+  const [calendarDays, setCalendarDays] = useState<Date[]>([]);
+
   // Generate calendar days for the current month
   useEffect(() => {
     const monthStart = startOfMonth(currentMonth);
@@ -37,11 +87,11 @@ const EnquiryModal = ({ isOpen, onClose, serviceId, serviceName, serviceOption }
     }
   }, [selectedDate]);
   
-  // Reset selected slot when date changes to prevent selecting unavailable slots
+  // Reset selected slot when date changes
   useEffect(() => {
     setSelectedSlot('');
   }, [selectedDate]);
-  
+
   // Calendar navigation
   const previousMonth = () => {
     setCurrentMonth(prevMonth => addMonths(prevMonth, -1));
@@ -50,14 +100,25 @@ const EnquiryModal = ({ isOpen, onClose, serviceId, serviceName, serviceOption }
   const nextMonth = () => {
     setCurrentMonth(prevMonth => addMonths(prevMonth, 1));
   };
-  
+
+  // Format time function
+  const formatTime = (timeString: string): string => {
+    if (!timeString) return 'TBD';
+    const [hours, minutes] = timeString.split(':');
+    const hour = parseInt(hours, 10);
+    const period = hour >= 12 ? 'PM' : 'AM';
+    const displayHour = hour % 12 || 12;
+    return `${displayHour}:${minutes} ${period}`;
+  };
+
   // Fetch available time slots for the selected date
   const fetchTimeSlots = async () => {
     setIsLoading(true);
     try {
       const formattedDate = format(selectedDate, 'yyyy-MM-dd');
       
-      // Get all available time slots for the date
+      console.log('Fetching time slots for date:', formattedDate);
+      
       const { data, error } = await supabase
         .from('time_slots')
         .select('*')
@@ -65,40 +126,35 @@ const EnquiryModal = ({ isOpen, onClose, serviceId, serviceName, serviceOption }
         .eq('is_available', true)
         .order('start_time');
       
-      if (error) throw error;
+      if (error) {
+        console.error('Error fetching time slots:', error);
+        toast.error('Failed to load available time slots');
+        setTimeSlots([]);
+        return;
+      }
       
-      // Add duration and format information to each time slot
+      console.log('Fetched time slots:', data);
+      
+      if (!data || data.length === 0) {
+        console.log('No time slots available for this date');
+        setTimeSlots([]);
+        return;
+      }
+      
+      // Add formatting to each time slot
       const enhancedTimeSlots = data.map(slot => {
-        // Determine if this is a bridal service
         const isBridalService = serviceOption && serviceOption.toLowerCase().includes('bridal');
-        
-        // Calculate duration in minutes
-        const startParts = slot.start_time.split(':').map(part => parseInt(part, 10));
-        const endParts = slot.end_time.split(':').map(part => parseInt(part, 10));
-        
-        const startMinutes = (startParts[0] * 60) + startParts[1];
-        const endMinutes = (endParts[0] * 60) + endParts[1];
-        const durationMinutes = endMinutes - startMinutes;
-        
-        // Format time for display (12-hour format with AM/PM)
-        const formatTimeForDisplay = (timeString) => {
-          const [hours, minutes] = timeString.split(':');
-          const hour = parseInt(hours, 10);
-          const period = hour >= 12 ? 'PM' : 'AM';
-          const displayHour = hour % 12 || 12; // Convert 0 to 12 for 12 AM
-          return `${displayHour}:${minutes} ${period}`;
-        };
         
         return {
           ...slot,
-          formattedStartTime: formatTimeForDisplay(slot.start_time),
-          formattedEndTime: formatTimeForDisplay(slot.end_time),
-          durationMinutes,
+          formattedStartTime: formatTime(slot.start_time),
+          formattedEndTime: formatTime(slot.end_time),
           durationText: isBridalService ? '2 hours' : '1 hour 30 minutes'
         };
       });
       
       setTimeSlots(enhancedTimeSlots);
+      
     } catch (error) {
       console.error('Error fetching time slots:', error);
       toast.error('Failed to load available time slots');
@@ -107,18 +163,163 @@ const EnquiryModal = ({ isOpen, onClose, serviceId, serviceName, serviceOption }
       setIsLoading(false);
     }
   };
-  
-  // Handle form input changes
-  const handleInputChange = (e) => {
+
+  // Send confirmation email function
+  const sendConfirmationEmail = async (enquiryData: EnquiryData): Promise<boolean> => {
+    try {
+      console.log('Sending confirmation emails for:', enquiryData);
+      
+      const { client_name, client_email, service_option, enquiry_date, notes, client_phone } = enquiryData;
+      
+      // Get time slot details
+      let timeSlotData = null;
+      if (enquiryData.time_slot_id) {
+        try {
+          const { data, error: timeSlotError } = await supabase
+            .from('time_slots')
+            .select('*')
+            .eq('id', enquiryData.time_slot_id)
+            .single();
+            
+          if (timeSlotError) {
+            console.warn('Could not fetch time slot details:', timeSlotError);
+          } else {
+            timeSlotData = data;
+          }
+        } catch (timeSlotError) {
+          console.warn('Time slot fetch failed:', timeSlotError);
+        }
+      }
+      
+      // Prepare data for email
+      const emailData = {
+        type: 'booking',
+        client_name,
+        client_email,
+        client_phone: client_phone || 'Not provided',
+        service_option,
+        enquiry_date,
+        time: timeSlotData ? `${formatTime(timeSlotData.start_time)} - ${formatTime(timeSlotData.end_time)}` : 'Time to be confirmed',
+        notes: notes || ''
+      };
+      
+      console.log('Sending email with data:', emailData);
+      
+      // Send emails via Netlify function
+      const response = await fetch('/.netlify/functions/send-booking-emails', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(emailData),
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Email API error response:', errorText);
+        throw new Error(`Email API error: ${response.status} - ${errorText}`);
+      }
+      
+      const result = await response.json();
+      console.log('Emails sent successfully:', result);
+      return true;
+      
+    } catch (error) {
+      console.error('Error in sendConfirmationEmail:', error);
+      // Don't throw - let the booking succeed even if email fails
+      return false;
+    }
+  };
+
+  // Handle input changes
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setFormData({ ...formData, [name]: value });
   };
-  
-  // Handle date selection in the calendar
-  const handleDateSelect = (date) => {
+
+  // Handle date selection
+  const handleDateSelect = (date: Date) => {
     setSelectedDate(date);
   };
-  
+
+  // Handle form submission
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    
+    if (!selectedSlot) {
+      toast.error('Please select a time slot');
+      return;
+    }
+
+    // Validate form data
+    if (!formData.name.trim() || !formData.email.trim() || !formData.phone.trim()) {
+      toast.error('Please fill in all required fields');
+      return;
+    }
+    
+    setIsLoading(true);
+    
+    try {
+      // Create the enquiry data object matching your exact schema
+      const enquiryData = {
+        service_option: serviceOption,
+        enquiry_date: format(selectedDate, 'yyyy-MM-dd'),
+        time_slot_id: selectedSlot, // UUID from time_slots table
+        client_name: formData.name.trim(),
+        client_email: formData.email.trim(),
+        client_phone: formData.phone.trim() || null,
+        notes: formData.notes.trim() || null,
+        status: 'pending'
+        // Don't include user_id, service_type_id, id, or created_at - let database handle them
+      };
+      
+      console.log('Submitting enquiry with data:', enquiryData);
+      
+      const { data, error } = await supabase
+        .from('enquiries')
+        .insert([enquiryData])
+        .select();
+        
+      if (error) {
+        console.error('Database error:', error);
+        throw new Error(`Database error: ${error.message}`);
+      }
+
+      if (!data || data.length === 0) {
+        throw new Error('No data returned from database');
+      }
+
+      console.log('Enquiry saved successfully:', data[0]);
+      
+      // Send confirmation emails
+      try {
+        await sendConfirmationEmail({
+          ...enquiryData,
+          id: data[0].id
+        });
+        console.log('Confirmation emails sent successfully');
+      } catch (emailError) {
+        console.error('Email error (continuing anyway):', emailError);
+        // Don't fail the whole process if email fails
+      }
+      
+      toast.success('Enquiry submitted successfully!');
+      setShowConfirmation(true);
+      
+    } catch (error) {
+      console.error('Error submitting enquiry:', error);
+      
+      // Show specific error message
+      if (error instanceof Error) {
+        toast.error(`Failed to submit enquiry: ${error.message}`);
+      } else {
+        toast.error('There was a problem submitting your enquiry. Please try again.');
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Render the month calendar
   const renderMonthCalendar = () => {
     return (
@@ -201,10 +402,10 @@ const EnquiryModal = ({ isOpen, onClose, serviceId, serviceName, serviceOption }
       </div>
     );
   };
-  
+
   // Render time slot selection UI
   const renderTimeSlotSelection = () => {
-    // Group time slots by morning, afternoon, and evening
+    // Group time slots by time of day
     const groupedSlots = {
       morning: timeSlots.filter(slot => {
         const hour = parseInt(slot.start_time.split(':')[0], 10);
@@ -220,7 +421,6 @@ const EnquiryModal = ({ isOpen, onClose, serviceId, serviceName, serviceOption }
       })
     };
     
-    // Determine service type text
     const isBridal = serviceOption && serviceOption.toLowerCase().includes('bridal');
     const serviceTypeText = isBridal ? 'Bridal Service' : 'Regular Service';
     const durationText = isBridal ? '2 hours' : '1 hour 30 minutes';
@@ -236,6 +436,7 @@ const EnquiryModal = ({ isOpen, onClose, serviceId, serviceName, serviceOption }
         {timeSlots.length === 0 ? (
           <div className="text-center py-4 bg-gray-50 rounded-md">
             <p className="text-gray-500">No available time slots for this date</p>
+            <p className="text-xs text-gray-400 mt-1">Please select a different date</p>
           </div>
         ) : (
           <div className="space-y-6">
@@ -315,145 +516,8 @@ const EnquiryModal = ({ isOpen, onClose, serviceId, serviceName, serviceOption }
       </div>
     );
   };
-  
-  // Handle form submission
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    
-    if (!selectedSlot) {
-      toast.error('Please select a time slot');
-      return;
-    }
-    
-    setIsLoading(true);
-    
-    try {
-      // Create the enquiry in the database
-      const enquiryData = {
-        service_type_id: serviceId,
-        service_option: serviceOption,
-        enquiry_date: format(selectedDate, 'yyyy-MM-dd'),
-        time_slot_id: selectedSlot,
-        client_name: formData.name,
-        client_email: formData.email,
-        client_phone: formData.phone,
-        notes: formData.notes,
-        status: 'pending'
-      };
-      
-      const { data, error } = await supabase
-        .from('enquiries')
-        .insert([enquiryData])
-        .select();
-        
-      if (error) throw error;
-      
-      // Send confirmation emails
-      await sendConfirmationEmail({
-        ...enquiryData,
-        id: data[0].id
-      });
-      
-      toast.success('Enquiry submitted successfully!');
-      setShowConfirmation(true);
-    } catch (error) {
-      console.error('Error submitting enquiry:', error);
-      toast.error('There was a problem submitting your enquiry');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-  
-  // Send confirmation emails
-  const sendConfirmationEmail = async (enquiryData) => {
-    try {
-      const { client_name, client_email, service_option, enquiry_date, notes } = enquiryData;
-      
-      // Get time slot details
-      const { data: timeSlotData, error: timeSlotError } = await supabase
-        .from('time_slots')
-        .select('*')
-        .eq('id', enquiryData.time_slot_id)
-        .single();
-        
-      if (timeSlotError) {
-        console.error('Error fetching time slot:', timeSlotError);
-        return false;
-      }
-      
-      // Prepare data for email templates
-      const emailData = {
-        clientName: client_name,
-        clientEmail: client_email,
-        clientPhone: enquiryData.client_phone || 'Not provided',
-        serviceName: serviceName,
-        serviceOption: service_option,
-        date: new Date(enquiry_date).toLocaleDateString('en-GB', { 
-          weekday: 'long', 
-          year: 'numeric', 
-          month: 'long', 
-          day: 'numeric' 
-        }),
-        time: `${timeSlotData.start_time} - ${timeSlotData.end_time}`,
-        notes: notes || ''
-      };
-      
-      try {
-        // Send confirmation email to client
-        const clientResponse = await fetch('/.netlify/functions/send-email', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            to: client_email,
-            subject: 'Your Enquiry with Yemisi Artistry',
-            template: 'client-confirmation',
-            data: emailData
-          }),
-        });
-        
-        if (!clientResponse.ok) {
-          const errorData = await clientResponse.json();
-          console.error('Error sending client email:', errorData);
-          // Continue with owner notification even if client email fails
-        } else {
-          console.log('Client email sent successfully');
-        }
-        
-        // Send notification email to business owner
-        const ownerResponse = await fetch('/.netlify/functions/send-email', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            to: 'yemisi@example.com', // Replace with the business owner's actual email
-            subject: 'New Enquiry on Yemisi Artistry',
-            template: 'business-notification',
-            data: emailData
-          }),
-        });
-        
-        if (!ownerResponse.ok) {
-          const errorData = await ownerResponse.json();
-          console.error('Error sending owner notification:', errorData);
-          return false;
-        }
-        
-        console.log('Owner notification sent successfully');
-        return true;
-      } catch (emailError) {
-        console.error('Error sending emails:', emailError);
-        return false;
-      }
-    } catch (error) {
-      console.error('Error in sendConfirmationEmail:', error);
-      return false;
-    }
-  };
-  
-  // Render confirmation screen after successful submission
+
+  // Render confirmation screen
   const renderConfirmation = () => {
     return (
       <div className="text-center py-8">
@@ -486,8 +550,8 @@ const EnquiryModal = ({ isOpen, onClose, serviceId, serviceName, serviceOption }
       </div>
     );
   };
-  
-  // Reset form for a new enquiry
+
+  // Reset form
   const resetForm = () => {
     setSelectedDate(new Date());
     setSelectedSlot('');
@@ -499,16 +563,16 @@ const EnquiryModal = ({ isOpen, onClose, serviceId, serviceName, serviceOption }
     });
     setShowConfirmation(false);
   };
-  
+
   // Close modal and reset form
   const handleClose = () => {
     resetForm();
     onClose();
   };
-  
+
   // Don't render anything if modal is not open
   if (!isOpen) return null;
-  
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
@@ -541,7 +605,7 @@ const EnquiryModal = ({ isOpen, onClose, serviceId, serviceName, serviceOption }
                       name="name"
                       value={formData.name}
                       onChange={handleInputChange}
-                      className="block w-full rounded-md border-gray-300 shadow-sm focus:border-pink-500 focus:ring-pink-500"
+                      className="block w-full rounded-md border-gray-300 shadow-sm focus:border-pink-500 focus:ring-pink-500 px-3 py-2 border"
                       required
                     />
                   </div>
@@ -552,7 +616,7 @@ const EnquiryModal = ({ isOpen, onClose, serviceId, serviceName, serviceOption }
                       name="email"
                       value={formData.email}
                       onChange={handleInputChange}
-                      className="block w-full rounded-md border-gray-300 shadow-sm focus:border-pink-500 focus:ring-pink-500"
+                      className="block w-full rounded-md border-gray-300 shadow-sm focus:border-pink-500 focus:ring-pink-500 px-3 py-2 border"
                       required
                     />
                   </div>
@@ -563,7 +627,7 @@ const EnquiryModal = ({ isOpen, onClose, serviceId, serviceName, serviceOption }
                       name="phone"
                       value={formData.phone}
                       onChange={handleInputChange}
-                      className="block w-full rounded-md border-gray-300 shadow-sm focus:border-pink-500 focus:ring-pink-500"
+                      className="block w-full rounded-md border-gray-300 shadow-sm focus:border-pink-500 focus:ring-pink-500 px-3 py-2 border"
                       required
                     />
                   </div>
@@ -605,7 +669,7 @@ const EnquiryModal = ({ isOpen, onClose, serviceId, serviceName, serviceOption }
                   value={formData.notes}
                   onChange={handleInputChange}
                   rows={3}
-                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-pink-500 focus:ring-pink-500"
+                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-pink-500 focus:ring-pink-500 px-3 py-2 border"
                   placeholder="Any specific requirements or questions..."
                 ></textarea>
               </div>
